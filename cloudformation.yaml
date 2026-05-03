@@ -76,7 +76,7 @@ Resources:
     Properties:
       InstanceType: c6i.large
       KeyName: !Ref KeyPairName
-      ImageId: ami-0d92a4724cae6f07b
+      ImageId: ami-002d61d6436f85f12
       SubnetId: !Ref MySubnet
       PrivateIpAddress: '192.168.1.10'
       SecurityGroupIds:
@@ -95,7 +95,7 @@ Resources:
     Properties:
       InstanceType: c6i.xlarge
       KeyName: !Ref KeyPairName
-      ImageId: ami-0582a2a7fbe79a30d
+      ImageId: ami-002d61d6436f85f12
       SubnetId: !Ref MySubnet
       PrivateIpAddress: '192.168.1.20'
       SecurityGroupIds:

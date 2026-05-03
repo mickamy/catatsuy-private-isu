@@ -1,0 +1,15 @@
+[Unit]
+Description=Mount unit for amazon-ssm-agent, revision 13009
+After=snapd.mounts-pre.target
+Before=snapd.mounts.target
+
+[Mount]
+What=/var/lib/snapd/snaps/amazon-ssm-agent_13009.snap
+Where=/snap/amazon-ssm-agent/13009
+Type=squashfs
+Options=nodev,ro,x-gdu.hide,x-gvfs-hide
+LazyUnmount=yes
+
+[Install]
+WantedBy=snapd.mounts.target
+WantedBy=multi-user.target

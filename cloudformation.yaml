@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: private-isu template
+
+Parameters:
+  KeyPairName:
+    Description: "Amazon EC2 Key Pair"
+    Type: AWS::EC2::KeyPair::KeyName
+  GitHubUsername:
+    Description: "GitHub Username for SSH public key"
+    Type: String
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '192.168.0.0/16'
+
+  MySubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '192.168.1.0/24'
+      AvailabilityZone: ap-northeast-1a
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  MyRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref MyRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MySubnet
+      RouteTableId: !Ref MyRouteTable
+
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH, HTTP, HTTPS access
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: -1
+          CidrIp: 192.168.0.0/16
+
+  ServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: c6i.large
+      KeyName: !Ref KeyPairName
+      ImageId: ami-0d92a4724cae6f07b
+      SubnetId: !Ref MySubnet
+      PrivateIpAddress: '192.168.1.10'
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          GITHUB_USER=${GitHubUsername}
+          mkdir -p /home/isucon/.ssh
+          curl -s https://github.com/$GITHUB_USER.keys >> /home/isucon/.ssh/authorized_keys
+          chown -R isucon:isucon /home/isucon/.ssh
+          chmod 600 /home/isucon/.ssh/authorized_keys
+
+  BenchmarkerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: c6i.xlarge
+      KeyName: !Ref KeyPairName
+      ImageId: ami-0582a2a7fbe79a30d
+      SubnetId: !Ref MySubnet
+      PrivateIpAddress: '192.168.1.20'
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          GITHUB_USER=${GitHubUsername}
+          mkdir -p /home/isucon/.ssh
+          curl -s https://github.com/$GITHUB_USER.keys >> /home/isucon/.ssh/authorized_keys
+          chown -R isucon:isucon /home/isucon/.ssh
+          chmod 600 /home/isucon/.ssh/authorized_keys
+
+  ServerEIP:
+    Type: AWS::EC2::EIP
+
+  BenchmarkerEIP:
+    Type: AWS::EC2::EIP
+
+  ServerEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref ServerInstance
+      EIP: !Ref ServerEIP
+
+  BenchmarkerEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref BenchmarkerInstance
+      EIP: !Ref BenchmarkerEIP
+

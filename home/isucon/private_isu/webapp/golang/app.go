@@ -497,14 +497,16 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
+	// JOIN users で del_flg=0 を絞ると users 駆動の filesort になる
+	// (EXPLAIN で 11k 行 temporary)。idx_posts_created_at の reverse scan
+	// が効くよう JOIN を外し、makePosts 側で del_flg!=0 を弾く。
+	// 弾かれる前提で多めに over-fetch する。
 	err := db.Select(&results, `
-SELECT p.id, p.user_id, p.body, p.mime, p.created_at, p.comment_count
-FROM posts p
-JOIN users u ON p.user_id = u.id
-WHERE u.del_flg = 0
-ORDER BY p.created_at DESC
+SELECT id, user_id, body, mime, created_at, comment_count
+FROM posts
+ORDER BY created_at DESC
 LIMIT ?
-`, postsPerPage)
+`, postsPerPage*3)
 	if err != nil {
 		log.Print(err)
 		return
@@ -605,14 +607,13 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
+	// getIndex と同じ理由で JOIN を外して idx_posts_created_at に乗せる。
 	err = db.Select(&results, `
-SELECT p.id, p.user_id, p.body, p.mime, p.created_at, p.comment_count
-FROM posts p
-JOIN users u on p.user_id = u.id
-WHERE u.del_flg = 0
-  AND p.created_at <= ?
-ORDER BY p.created_at DESC LIMIT ?
-`, t.Format(ISO8601Format), postsPerPage)
+SELECT id, user_id, body, mime, created_at, comment_count
+FROM posts
+WHERE created_at <= ?
+ORDER BY created_at DESC LIMIT ?
+`, t.Format(ISO8601Format), postsPerPage*3)
 	if err != nil {
 		log.Print(err)
 		return

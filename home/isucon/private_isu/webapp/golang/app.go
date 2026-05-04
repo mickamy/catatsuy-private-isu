@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -29,9 +30,12 @@ import (
 
 var (
 	db        *sqlx.DB
+	mc        *memcache.Client
 	store     *gsm.MemcacheStore
 	userCache sync.Map // map[int]User
 )
+
+const topPostsCacheKey = "posts:top60:v1"
 
 const (
 	postsPerPage  = 20
@@ -75,8 +79,8 @@ func init() {
 	if memdAddr == "" {
 		memdAddr = "localhost:11211"
 	}
-	memcacheClient := memcache.New(memdAddr)
-	store = gsm.NewMemcacheStore(memcacheClient, "iscogram_", []byte("sendagaya"))
+	mc = memcache.New(memdAddr)
+	store = gsm.NewMemcacheStore(mc, "iscogram_", []byte("sendagaya"))
 	log.SetOutput(io.Discard)
 }
 
@@ -394,6 +398,7 @@ var (
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
 	userCache = sync.Map{}
+	invalidateTopPosts()
 
 	// 初期 1000 ユーザーを cache に流し込んで cold-start の IN クエリ嵐を回避する。
 	// ベンチ中に追加された新規 user は makePosts/getSessionUser 経由で随時育つ。
@@ -517,21 +522,42 @@ func getLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// loadTopPosts は top page 用の最新 posts を memcached 経由で取得する。
+// staleness は TTL=1s で上限。POST /posts と /initialize で明示的に invalidate。
+// JOIN users で del_flg=0 を絞ると users 駆動の filesort になるので JOIN は持たず、
+// makePosts 側で del_flg!=0 を弾く前提で多めに over-fetch する。
+func loadTopPosts() ([]Post, error) {
+	if item, err := mc.Get(topPostsCacheKey); err == nil {
+		var posts []Post
+		if err := json.Unmarshal(item.Value, &posts); err == nil {
+			return posts, nil
+		}
+	}
+	var posts []Post
+	if err := db.Select(&posts, `SELECT id, user_id, body, mime, created_at, comment_count
+FROM posts
+ORDER BY created_at DESC
+LIMIT ?`, postsPerPage*3); err != nil {
+		return nil, err
+	}
+	if data, err := json.Marshal(posts); err == nil {
+		_ = mc.Set(&memcache.Item{
+			Key:        topPostsCacheKey,
+			Value:      data,
+			Expiration: 1,
+		})
+	}
+	return posts, nil
+}
+
+func invalidateTopPosts() {
+	_ = mc.Delete(topPostsCacheKey)
+}
+
 func getIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
 
-	results := []Post{}
-
-	// JOIN users で del_flg=0 を絞ると users 駆動の filesort になる
-	// (EXPLAIN で 11k 行 temporary)。idx_posts_created_at の reverse scan
-	// が効くよう JOIN を外し、makePosts 側で del_flg!=0 を弾く。
-	// 弾かれる前提で多めに over-fetch する。
-	err := db.Select(&results, `
-SELECT id, user_id, body, mime, created_at, comment_count
-FROM posts
-ORDER BY created_at DESC
-LIMIT ?
-`, postsPerPage*3)
+	results, err := loadTopPosts()
 	if err != nil {
 		log.Print(err)
 		return
@@ -762,6 +788,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
+	invalidateTopPosts()
 
 	pid, err := result.LastInsertId()
 	if err != nil {

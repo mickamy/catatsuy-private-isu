@@ -6,6 +6,7 @@ After=syslog.target
 WorkingDirectory=/home/isucon/private_isu/webapp/golang
 EnvironmentFile=/home/isucon/env.sh
 Environment=RACK_ENV=production
+Environment=GOGC=500
 PIDFile=/home/isucon/private_isu/webapp/golang/server.pid
 
 User=isucon

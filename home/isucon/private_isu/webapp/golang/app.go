@@ -83,7 +83,6 @@ func init() {
 	}
 	mc = memcache.New(memdAddr)
 	store = gsm.NewMemcacheStore(mc, "iscogram_", []byte("sendagaya"))
-	log.SetOutput(io.Discard)
 }
 
 func dbInitialize() {

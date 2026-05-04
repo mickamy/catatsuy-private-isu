@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"log"
@@ -53,16 +54,17 @@ type User struct {
 }
 
 type Post struct {
-	ID           int       `db:"id"`
-	UserID       int       `db:"user_id"`
-	Body         string    `db:"body"`
-	Mime         string    `db:"mime"`
-	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int       `db:"comment_count"`
-	Comments     []Comment
-	User         User
-	CSRFToken    string
-	ImageURL     string
+	ID            int       `db:"id"`
+	UserID        int       `db:"user_id"`
+	Body          string    `db:"body"`
+	Mime          string    `db:"mime"`
+	CreatedAt     time.Time `db:"created_at"`
+	CommentCount  int       `db:"comment_count"`
+	Comments      []Comment
+	User          User
+	CSRFToken     string
+	ImageURL      string
+	RenderedHTML  template.HTML
 }
 
 type Comment struct {
@@ -316,9 +318,77 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			cs[l], cs[r] = cs[r], cs[l]
 		}
 		posts[i].Comments = cs
+		posts[i].RenderedHTML = renderPost(posts[i])
 	}
 
 	return posts, nil
+}
+
+// renderPost は post.html 相当の HTML を Go 側で組み立てる。
+// html/template の reflect 経由のフィールド lookup と auto-escape を回避するため、
+// 必要箇所で html.EscapeString を直接呼んで安全な HTML を生成する。
+// 結果は template.HTML として渡されるので、外側のテンプレートは再 escape しない。
+func renderPost(p Post) template.HTML {
+	var b strings.Builder
+	b.Grow(2048 + len(p.Comments)*256)
+
+	createdAt := p.CreatedAt.Format(ISO8601Format)
+	accountEsc := html.EscapeString(p.User.AccountName)
+
+	b.WriteString(`<div class="isu-post" id="pid_`)
+	b.WriteString(strconv.Itoa(p.ID))
+	b.WriteString(`" data-created-at="`)
+	b.WriteString(createdAt)
+	b.WriteString(`">`)
+
+	b.WriteString(`<div class="isu-post-header">`)
+	b.WriteString(`<a href="/@`)
+	b.WriteString(accountEsc)
+	b.WriteString(` " class="isu-post-account-name">`)
+	b.WriteString(accountEsc)
+	b.WriteString(`</a>`)
+	b.WriteString(`<a href="/posts/`)
+	b.WriteString(strconv.Itoa(p.ID))
+	b.WriteString(`" class="isu-post-permalink"><time class="timeago" datetime="`)
+	b.WriteString(createdAt)
+	b.WriteString(`"></time></a></div>`)
+
+	b.WriteString(`<div class="isu-post-image"><img src="`)
+	b.WriteString(html.EscapeString(p.ImageURL))
+	b.WriteString(`" class="isu-image"></div>`)
+
+	b.WriteString(`<div class="isu-post-text"><a href="/@`)
+	b.WriteString(accountEsc)
+	b.WriteString(`" class="isu-post-account-name">`)
+	b.WriteString(accountEsc)
+	b.WriteString(`</a>`)
+	b.WriteString(html.EscapeString(p.Body))
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div class="isu-post-comment"><div class="isu-post-comment-count">comments: <b>`)
+	b.WriteString(strconv.Itoa(p.CommentCount))
+	b.WriteString(`</b></div>`)
+
+	for _, c := range p.Comments {
+		ca := html.EscapeString(c.User.AccountName)
+		b.WriteString(`<div class="isu-comment"><a href="/@`)
+		b.WriteString(ca)
+		b.WriteString(`" class="isu-comment-account-name">`)
+		b.WriteString(ca)
+		b.WriteString(`</a><span class="isu-comment-text">`)
+		b.WriteString(html.EscapeString(c.Comment))
+		b.WriteString(`</span></div>`)
+	}
+
+	b.WriteString(`<div class="isu-comment-form"><form method="post" action="/comment">`)
+	b.WriteString(`<input type="text" name="comment">`)
+	b.WriteString(`<input type="hidden" name="post_id" value="`)
+	b.WriteString(strconv.Itoa(p.ID))
+	b.WriteString(`"><input type="hidden" name="csrf_token" value="`)
+	b.WriteString(html.EscapeString(p.CSRFToken))
+	b.WriteString(`"><input type="submit" name="submit" value="submit"></form></div></div></div>`)
+
+	return template.HTML(b.String())
 }
 
 func imageURL(p Post) string {
@@ -372,22 +442,18 @@ var (
 		getTemplPath("layout.html"),
 		getTemplPath("index.html"),
 		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
 	))
 	accountTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("user.html"),
 		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
 	))
 	postsTpl = template.Must(template.ParseFiles(
 		getTemplPath("posts.html"),
-		getTemplPath("post.html"),
 	))
 	postIDTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("post_id.html"),
-		getTemplPath("post.html"),
 	))
 	bannedTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),

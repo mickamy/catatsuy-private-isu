@@ -868,7 +868,9 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	}[mime]
 	if ext != "" {
 		imgFilePath := fmt.Sprintf("/home/isucon/private_isu/webapp/public/image/%d.%s", pid, ext)
-		_ = os.WriteFile(imgFilePath, filedata, 0644)
+		go func(path string, data []byte) {
+			_ = os.WriteFile(path, data, 0644)
+		}(imgFilePath, filedata)
 	}
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)

@@ -237,7 +237,11 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	}
 
 	posts := make([]Post, 0, postsPerPage)
+	// posts に出ていく id 全部 (extraIDs での dedup や reverse 用)
 	postIDs := make([]int, 0, postsPerPage)
+	// comment_count > 0 の post だけ comments 取得対象に入れる。
+	// 0 件 post を IN から除けば scan 範囲・転送 row 数が減る。
+	commentingIDs := make([]int, 0, postsPerPage)
 	for _, p := range results {
 		u, ok := userMap[p.UserID]
 		if !ok || u.DelFlg != 0 {
@@ -248,6 +252,9 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		p.ImageURL = imageURL(p)
 		posts = append(posts, p)
 		postIDs = append(postIDs, p.ID)
+		if p.CommentCount > 0 {
+			commentingIDs = append(commentingIDs, p.ID)
+		}
 		if len(posts) >= postsPerPage {
 			break
 		}
@@ -257,11 +264,11 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	}
 
 	var comments []Comment
-	{
+	if len(commentingIDs) > 0 {
 		// idx_post_created (post_id, created_at) に乗る covering scan。
 		// 直近 3 件への絞り込みは MySQL の ROW_NUMBER OVER PARTITION より
 		// Go 側で post_id 毎にカウントする方が安い (temp table を作らない)。
-		query, args, err := sqlx.In("SELECT `id`, `post_id`, `user_id`, `comment`, `created_at` FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
+		query, args, err := sqlx.In("SELECT `id`, `post_id`, `user_id`, `comment`, `created_at` FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", commentingIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +277,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 		if !allComments {
 			out := comments[:0]
-			countByPost := make(map[int]int, len(postIDs))
+			countByPost := make(map[int]int, len(commentingIDs))
 			for _, c := range comments {
 				if countByPost[c.PostID] >= 3 {
 					continue

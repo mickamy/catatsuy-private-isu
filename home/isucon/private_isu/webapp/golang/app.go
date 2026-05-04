@@ -893,10 +893,11 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		"image/gif":  "gif",
 	}[mime]
 	if ext != "" {
+		// goroutine で逃すと redirect 後の GET /image/{pid} が write 未完了の
+		// 部分ファイルを掴んで bench が「静的ファイルが正しくありません」で
+		// fail する。同期書き込みで完了を保証する。
 		imgFilePath := fmt.Sprintf("%s/%d.%s", imageDir, pid, ext)
-		go func(path string, data []byte) {
-			_ = os.WriteFile(path, data, 0644)
-		}(imgFilePath, filedata)
+		_ = os.WriteFile(imgFilePath, filedata, 0644)
 	}
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)

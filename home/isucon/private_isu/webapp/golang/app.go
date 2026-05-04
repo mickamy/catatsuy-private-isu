@@ -38,6 +38,8 @@ var (
 
 const topPostsCacheKey = "posts:top60:v1"
 
+const imageDir = "/home/isucon/private_isu/webapp/public/image"
+
 const (
 	postsPerPage  = 20
 	ISO8601Format = "2006-01-02T15:04:05-07:00"
@@ -465,6 +467,30 @@ func getInitialize(w http.ResponseWriter, r *http.Request) {
 	userCache = sync.Map{}
 	invalidateTopPosts()
 
+	// dbInitialize で posts.id > 10000 を削除しているのに合わせて、
+	// public/image 配下のベンチ累積画像も同じ閾値で削除する。
+	// 放置すると nginx の client body buffer 用ディスクが枯渇し、
+	// POST / が ENOSPC で 500 になる事象が発生する。
+	if entries, err := os.ReadDir(imageDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			dot := strings.IndexByte(name, '.')
+			if dot <= 0 {
+				continue
+			}
+			id, err := strconv.Atoi(name[:dot])
+			if err != nil {
+				continue
+			}
+			if id > 10000 {
+				_ = os.Remove(imageDir + "/" + name)
+			}
+		}
+	}
+
 	// 初期 1000 ユーザーを cache に流し込んで cold-start の IN クエリ嵐を回避する。
 	// ベンチ中に追加された新規 user は makePosts/getSessionUser 経由で随時育つ。
 	var users []User
@@ -867,7 +893,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		"image/gif":  "gif",
 	}[mime]
 	if ext != "" {
-		imgFilePath := fmt.Sprintf("/home/isucon/private_isu/webapp/public/image/%d.%s", pid, ext)
+		imgFilePath := fmt.Sprintf("%s/%d.%s", imageDir, pid, ext)
 		go func(path string, data []byte) {
 			_ = os.WriteFile(path, data, 0644)
 		}(imgFilePath, filedata)

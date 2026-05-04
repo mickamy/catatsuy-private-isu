@@ -58,6 +58,7 @@ type Post struct {
 	Comments     []Comment
 	User         User
 	CSRFToken    string
+	ImageURL     string
 }
 
 type Comment struct {
@@ -218,6 +219,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 		p.User = u
 		p.CSRFToken = csrfToken
+		p.ImageURL = imageURL(p)
 		posts = append(posts, p)
 		postIDs = append(postIDs, p.ID)
 		if len(posts) >= postsPerPage {
@@ -339,10 +341,6 @@ func getTemplPath(filename string) string {
 }
 
 var (
-	tplFuncMap = template.FuncMap{
-		"imageURL": imageURL,
-	}
-
 	loginTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("login.html"),
@@ -351,23 +349,23 @@ var (
 		getTemplPath("layout.html"),
 		getTemplPath("register.html"),
 	))
-	indexTpl = template.Must(template.New("layout.html").Funcs(tplFuncMap).ParseFiles(
+	indexTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("index.html"),
 		getTemplPath("posts.html"),
 		getTemplPath("post.html"),
 	))
-	accountTpl = template.Must(template.New("layout.html").Funcs(tplFuncMap).ParseFiles(
+	accountTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("user.html"),
 		getTemplPath("posts.html"),
 		getTemplPath("post.html"),
 	))
-	postsTpl = template.Must(template.New("posts.html").Funcs(tplFuncMap).ParseFiles(
+	postsTpl = template.Must(template.ParseFiles(
 		getTemplPath("posts.html"),
 		getTemplPath("post.html"),
 	))
-	postIDTpl = template.Must(template.New("layout.html").Funcs(tplFuncMap).ParseFiles(
+	postIDTpl = template.Must(template.ParseFiles(
 		getTemplPath("layout.html"),
 		getTemplPath("post_id.html"),
 		getTemplPath("post.html"),

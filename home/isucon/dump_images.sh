@@ -5,7 +5,7 @@ DB_USER=isuconp
 DB_PASS=isuconp
 DB_NAME=isuconp
 DB_HOST=127.0.0.1
-DB_PORT=3307
+DB_PORT=3306
 
 DEST=/home/isucon/private_isu/webapp/public/image
 mkdir -p "$DEST"

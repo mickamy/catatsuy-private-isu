@@ -172,51 +172,146 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 }
 
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
-	var posts []Post
+	postUserIDs := make([]int, 0, len(results))
+	seen := make(map[int]bool, len(results))
+	for _, result := range results {
+		if _, ok := seen[result.UserID]; ok {
+			continue
+		}
+		postUserIDs = append(postUserIDs, result.UserID)
+		seen[result.UserID] = true
+	}
 
+	userMap := make(map[int]User, len(postUserIDs))
+	{
+		query, args, err := sqlx.In("SELECT * FROM `users` WHERE `id` IN (?)", postUserIDs)
+		if err != nil {
+			return nil, err
+		}
+		var us []User
+		err = db.Select(&us, query, args...)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, u := range us {
+			userMap[u.ID] = u
+		}
+	}
+
+	posts := make([]Post, 0, postsPerPage)
+	postIDs := make([]int, 0, postsPerPage)
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
-		if err != nil {
-			return nil, err
+		u, ok := userMap[p.UserID]
+		if !ok || u.DelFlg != 0 {
+			continue
 		}
-
-		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC"
-		if !allComments {
-			query += " LIMIT 3"
-		}
-		var comments []Comment
-		err = db.Select(&comments, query, p.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		for i := range comments {
-			err := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// reverse
-		for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-			comments[i], comments[j] = comments[j], comments[i]
-		}
-
-		p.Comments = comments
-
-		err = db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID)
-		if err != nil {
-			return nil, err
-		}
-
+		p.User = u
 		p.CSRFToken = csrfToken
-
-		if p.User.DelFlg == 0 {
-			posts = append(posts, p)
-		}
+		posts = append(posts, p)
+		postIDs = append(postIDs, p.ID)
 		if len(posts) >= postsPerPage {
 			break
 		}
+	}
+	if len(posts) == 0 {
+		return posts, nil
+	}
+
+	type countRow struct {
+		PostID int `db:"post_id"`
+		Count  int `db:"count"`
+	}
+	countMap := make(map[int]int, len(posts))
+	{
+		query, args, err := sqlx.In("SELECT `post_id`, COUNT(*) AS `count` FROM `comments` WHERE `post_id` IN (?) GROUP BY `post_id`", postIDs)
+		if err != nil {
+			return nil, err
+		}
+		var rows []countRow
+		err = db.Select(&rows, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			countMap[row.PostID] = row.Count
+		}
+	}
+	for _, r := range results {
+		if row, ok := countMap[r.ID]; ok {
+			r.CommentCount = row
+		}
+	}
+
+	var comments []Comment
+	{
+		var (
+			query string
+			args  []interface{}
+			err   error
+		)
+		if allComments {
+			query, args, err = sqlx.In("SELECT * FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
+		} else {
+			query, args, err = sqlx.In(
+				`
+SELECT id, post_id, user_id, comment, created_at
+FROM (SELECT id,
+             post_id,
+             user_id,
+             comment,
+             created_at,
+             ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
+      FROM comments
+      WHERE post_id IN (?)
+        AND row_num <= 3
+      ORDER BY created_at DESC
+)
+`,
+				postIDs,
+			)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := db.Select(&comments, query, args...); err != nil {
+			return nil, err
+		}
+	}
+
+	extraIDs := make([]int, 0)
+	for _, c := range comments {
+		if _, ok := userMap[c.UserID]; !ok {
+			userMap[c.UserID] = User{}
+			extraIDs = append(extraIDs, c.UserID)
+		}
+	}
+	if len(extraIDs) > 0 {
+		query, args, err := sqlx.In("SELECT * FROM `users` WHERE `id` IN (?)", extraIDs)
+		if err != nil {
+			return nil, err
+		}
+		var us []User
+		if err := db.Select(&us, query, args...); err != nil {
+			return nil, err
+		}
+		for _, u := range us {
+			userMap[u.ID] = u
+		}
+	}
+
+	commentsByPost := make(map[int][]Comment, len(posts))
+	for _, c := range comments {
+		c.User = userMap[c.UserID]
+		commentsByPost[c.PostID] = append(commentsByPost[c.PostID], c)
+	}
+	for i := range posts {
+		cs := commentsByPost[posts[i].ID]
+		for l, r := 0, len(cs)-1; l < r; l, r = l+1, r-1 {
+			cs[l], cs[r] = cs[r], cs[l]
+		}
+		posts[i].Comments = cs
+		posts[i].CommentCount = countMap[posts[i].ID]
 	}
 
 	return posts, nil

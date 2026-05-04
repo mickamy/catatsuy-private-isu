@@ -423,7 +423,7 @@ func secureRandomStr(b int) string {
 	if _, err := crand.Read(k); err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf("%x", k)
+	return hex.EncodeToString(k)
 }
 
 func getTemplPath(filename string) string {
@@ -1072,5 +1072,12 @@ func main() {
 		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
 	}()
 
-	log.Fatal(http.ListenAndServe(":8080", r))
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }

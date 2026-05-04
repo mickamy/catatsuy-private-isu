@@ -864,7 +864,7 @@ func main() {
 	if host == "" {
 		host = "localhost"
 	}
-	port := "3306"
+	port := "3307"
 	_, err := strconv.Atoi(port)
 	if err != nil {
 		log.Fatalf("Failed to read DB port number from an environment variable ISUCONP_DB_PORT.\nError: %s", err.Error())

@@ -539,26 +539,21 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commentCount := 0
-	err = db.Get(&commentCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?", user.ID)
-	if err != nil {
-		log.Print(err)
-		return
+	type counts struct {
+		commentCount   int `db:"comment_count"`
+		postCount      int `db:"post_count"`
+		commentedCount int `db:"commented_count"`
 	}
 
-	var postCount int
-	err = db.Get(&postCount, "SELECT COUNT(*) AS count FROM `posts` WHERE `user_id` = ?", user.ID)
-
-	var commentedCount int
-	err = db.Select(&commentedCount, `
-SELECT COUNT(1) AS count
-FROM comments c
-         JOIN posts p on p.id = c.post_id
-WHERE p.user_id = ?
-`, user.ID)
-	if err != nil {
-		log.Print(err)
-	}
+	var c counts
+	db.Select(&c, `
+SELECT (SELECT COUNT(*) FROM comments WHERE user_id = ?) AS comment_count,
+       (SELECT COUNT(*) FROM posts WHERE user_id = ?)    AS post_count,
+       (SELECT COUNT(*)
+        FROM comments c
+                 JOIN posts p ON c.post_id = p.id
+        WHERE p.user_id = ?)                             AS commented_count
+`, user.ID, user.ID, user.ID)
 
 	me := getSessionUser(r)
 
@@ -578,7 +573,7 @@ WHERE p.user_id = ?
 		CommentCount   int
 		CommentedCount int
 		Me             User
-	}{posts, user, postCount, commentCount, commentedCount, me})
+	}{posts, user, c.postCount, c.commentCount, c.commentedCount, me})
 }
 
 func getPosts(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"path"
@@ -75,7 +76,7 @@ func init() {
 	}
 	memcacheClient := memcache.New(memdAddr)
 	store = gsm.NewMemcacheStore(memcacheClient, "iscogram_", []byte("sendagaya"))
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	log.SetOutput(io.Discard)
 }
 
 func dbInitialize() {
@@ -922,6 +923,10 @@ func main() {
 	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 		http.FileServerFS(root.FS()).ServeHTTP(w, r)
 	})
+
+	go func() {
+		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
+	}()
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }

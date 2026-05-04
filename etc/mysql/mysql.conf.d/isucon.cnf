@@ -1,0 +1,14 @@
+[mysqld]
+# 全データを buffer pool に載せる（RAM の 60-70%）
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+
+# write 系の安全性を緩めて速度優先（ISUCON 用）
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+innodb_doublewrite = 0
+sync_binlog = 0
+disable-log-bin
+
+# コネクション
+max_connections = 300

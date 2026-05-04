@@ -182,6 +182,44 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 	}
 }
 
+// loadUsersInto は ids のうち userMap にまだ無いものを userCache から先に引き、
+// そこにも無い分だけまとめて 1 度だけ DB に問い合わせる。
+// 取得結果は userCache に格納して以後のリクエストに再利用させる。
+func loadUsersInto(ids []int, userMap map[int]User) error {
+	var missing []int
+	seen := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		if _, ok := userMap[id]; ok {
+			continue
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if v, ok := userCache.Load(id); ok {
+			userMap[id] = v.(User)
+			continue
+		}
+		missing = append(missing, id)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	query, args, err := sqlx.In("SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` IN (?)", missing)
+	if err != nil {
+		return err
+	}
+	var us []User
+	if err := db.Select(&us, query, args...); err != nil {
+		return err
+	}
+	for _, u := range us {
+		userMap[u.ID] = u
+		userCache.Store(u.ID, u)
+	}
+	return nil
+}
+
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	postUserIDs := make([]int, 0, len(results))
 	seen := make(map[int]bool, len(results))
@@ -194,20 +232,8 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	}
 
 	userMap := make(map[int]User, len(postUserIDs))
-	{
-		query, args, err := sqlx.In("SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` IN (?)", postUserIDs)
-		if err != nil {
-			return nil, err
-		}
-		var us []User
-		err = db.Select(&us, query, args...)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, u := range us {
-			userMap[u.ID] = u
-		}
+	if err := loadUsersInto(postUserIDs, userMap); err != nil {
+		return nil, err
 	}
 
 	posts := make([]Post, 0, postsPerPage)
@@ -268,21 +294,12 @@ ORDER BY post_id, created_at DESC
 	extraIDs := make([]int, 0)
 	for _, c := range comments {
 		if _, ok := userMap[c.UserID]; !ok {
-			userMap[c.UserID] = User{}
 			extraIDs = append(extraIDs, c.UserID)
 		}
 	}
 	if len(extraIDs) > 0 {
-		query, args, err := sqlx.In("SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` IN (?)", extraIDs)
-		if err != nil {
+		if err := loadUsersInto(extraIDs, userMap); err != nil {
 			return nil, err
-		}
-		var us []User
-		if err := db.Select(&us, query, args...); err != nil {
-			return nil, err
-		}
-		for _, u := range us {
-			userMap[u.ID] = u
 		}
 	}
 

@@ -92,7 +92,7 @@ func dbInitialize() {
 
 func tryLogin(accountName, password string) *User {
 	u := User{}
-	err := db.Get(&u, "SELECT * FROM users WHERE account_name = ? AND del_flg = 0", accountName)
+	err := db.Get(&u, "SELECT `id`, `account_name`, `passhash` FROM users WHERE account_name = ? AND del_flg = 0", accountName)
 	if err != nil {
 		return nil
 	}
@@ -141,7 +141,7 @@ func getSessionUser(r *http.Request) User {
 
 	u := User{}
 
-	err := db.Get(&u, "SELECT * FROM `users` WHERE `id` = ?", uid)
+	err := db.Get(&u, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` = ?", uid)
 	if err != nil {
 		return User{}
 	}
@@ -175,7 +175,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 	userMap := make(map[int]User, len(postUserIDs))
 	{
-		query, args, err := sqlx.In("SELECT * FROM `users` WHERE `id` IN (?)", postUserIDs)
+		query, args, err := sqlx.In("SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` IN (?)", postUserIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -237,7 +237,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			err   error
 		)
 		if allComments {
-			query, args, err = sqlx.In("SELECT * FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
+			query, args, err = sqlx.In("SELECT `id`, `post_id`, `user_id`, `comment`, `created_at` FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
 		} else {
 			query, args, err = sqlx.In(
 				`
@@ -272,7 +272,7 @@ ORDER BY post_id, created_at DESC
 		}
 	}
 	if len(extraIDs) > 0 {
-		query, args, err := sqlx.In("SELECT * FROM `users` WHERE `id` IN (?)", extraIDs)
+		query, args, err := sqlx.In("SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` IN (?)", extraIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -531,7 +531,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 	accountName := r.PathValue("accountName")
 	user := User{}
 
-	err := db.Get(&user, "SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0", accountName)
+	err := db.Get(&user, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `account_name` = ? AND `del_flg` = 0", accountName)
 	if err != nil {
 		log.Print(err)
 		return
@@ -643,7 +643,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
@@ -799,7 +799,7 @@ func getAdminBanned(w http.ResponseWriter, r *http.Request) {
 	}
 
 	users := []User{}
-	err := db.Select(&users, "SELECT * FROM `users` WHERE `authority` = 0 AND `del_flg` = 0 ORDER BY `created_at` DESC")
+	err := db.Select(&users, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `authority` = 0 AND `del_flg` = 0 ORDER BY `created_at` DESC")
 	if err != nil {
 		log.Print(err)
 		return

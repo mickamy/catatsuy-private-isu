@@ -258,36 +258,27 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 	var comments []Comment
 	{
-		var (
-			query string
-			args  []interface{}
-			err   error
-		)
-		if allComments {
-			query, args, err = sqlx.In("SELECT `id`, `post_id`, `user_id`, `comment`, `created_at` FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
-		} else {
-			query, args, err = sqlx.In(
-				`
-SELECT id, post_id, user_id, comment, created_at
-FROM (SELECT id,
-             post_id,
-             user_id,
-             comment,
-             created_at,
-             ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
-      FROM comments
-      WHERE post_id IN (?)) t
-WHERE t.row_num <= 3
-ORDER BY post_id, created_at DESC
-`,
-				postIDs,
-			)
-		}
+		// idx_post_created (post_id, created_at) に乗る covering scan。
+		// 直近 3 件への絞り込みは MySQL の ROW_NUMBER OVER PARTITION より
+		// Go 側で post_id 毎にカウントする方が安い (temp table を作らない)。
+		query, args, err := sqlx.In("SELECT `id`, `post_id`, `user_id`, `comment`, `created_at` FROM `comments` WHERE `post_id` IN (?) ORDER BY `post_id`, `created_at` DESC", postIDs)
 		if err != nil {
 			return nil, err
 		}
 		if err := db.Select(&comments, query, args...); err != nil {
 			return nil, err
+		}
+		if !allComments {
+			out := comments[:0]
+			countByPost := make(map[int]int, len(postIDs))
+			for _, c := range comments {
+				if countByPost[c.PostID] >= 3 {
+					continue
+				}
+				countByPost[c.PostID]++
+				out = append(out, c)
+			}
+			comments = out
 		}
 	}
 

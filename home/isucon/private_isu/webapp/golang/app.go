@@ -530,7 +530,8 @@ LIMIT ?
 		return
 	}
 
-	posts, err := makePosts(results, getCSRFToken(r), false)
+	csrfToken := getCSRFToken(r)
+	posts, err := makePosts(results, csrfToken, false)
 	if err != nil {
 		log.Print(err)
 		return
@@ -541,7 +542,7 @@ LIMIT ?
 		Me        User
 		CSRFToken string
 		Flash     string
-	}{posts, me, getCSRFToken(r), getFlash(w, r, "notice")})
+	}{posts, me, csrfToken, getFlash(w, r, "notice")})
 }
 
 func getAccountName(w http.ResponseWriter, r *http.Request) {
@@ -897,6 +898,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
+	db.SetMaxOpenConns(100)
+	db.SetMaxIdleConns(100)
+	db.SetConnMaxLifetime(3 * time.Minute)
 	defer db.Close()
 
 	root, err := os.OpenRoot("../public")

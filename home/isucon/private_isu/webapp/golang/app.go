@@ -396,6 +396,16 @@ var (
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
 	userCache = sync.Map{}
+
+	// 初期 1000 ユーザーを cache に流し込んで cold-start の IN クエリ嵐を回避する。
+	// ベンチ中に追加された新規 user は makePosts/getSessionUser 経由で随時育つ。
+	var users []User
+	if err := db.Select(&users, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users`"); err == nil {
+		for _, u := range users {
+			userCache.Store(u.ID, u)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 

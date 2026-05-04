@@ -172,7 +172,6 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 }
 
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
-	log.Printf("makePosts: csrfToken=%q len(results)=%d", csrfToken, len(results))
 	postUserIDs := make([]int, 0, len(results))
 	seen := make(map[int]bool, len(results))
 	for _, result := range results {
@@ -309,6 +308,10 @@ ORDER BY post_id, created_at DESC
 		posts[i].CommentCount = countMap[posts[i].ID]
 	}
 
+	if len(posts) > 0 {
+		log.Printf("makePosts return: count=%d first.CSRFToken=%q first.User.AccountName=%q",
+			len(posts), posts[0].CSRFToken, posts[0].User.AccountName)
+	}
 	return posts, nil
 }
 

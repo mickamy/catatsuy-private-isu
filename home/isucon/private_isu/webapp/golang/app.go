@@ -201,13 +201,13 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 	posts := make([]Post, 0, postsPerPage)
 	postIDs := make([]int, 0, postsPerPage)
-	for i, p := range results {
+	for _, p := range results {
 		u, ok := userMap[p.UserID]
 		if !ok || u.DelFlg != 0 {
 			continue
 		}
-		results[i].User = u
-		results[i].CSRFToken = csrfToken
+		p.User = u
+		p.CSRFToken = csrfToken
 		posts = append(posts, p)
 		postIDs = append(postIDs, p.ID)
 		if len(posts) >= postsPerPage {
@@ -308,10 +308,6 @@ ORDER BY post_id, created_at DESC
 		posts[i].CommentCount = countMap[posts[i].ID]
 	}
 
-	if len(posts) > 0 {
-		log.Printf("makePosts return: count=%d first.CSRFToken=%q first.User.AccountName=%q",
-			len(posts), posts[0].CSRFToken, posts[0].User.AccountName)
-	}
 	return posts, nil
 }
 

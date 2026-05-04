@@ -53,7 +53,7 @@ type Post struct {
 	Body         string    `db:"body"`
 	Mime         string    `db:"mime"`
 	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int
+	CommentCount int       `db:"comment_count"`
 	Comments     []Comment
 	User         User
 	CSRFToken    string
@@ -85,6 +85,8 @@ func dbInitialize() {
 		"DELETE FROM comments WHERE id > 100000",
 		"UPDATE users SET del_flg = 0",
 		"UPDATE users SET del_flg = 1 WHERE id % 50 = 0",
+		"UPDATE posts SET comment_count = 0",
+		"UPDATE posts p JOIN (SELECT post_id, COUNT(*) AS cnt FROM comments GROUP BY post_id) c ON p.id = c.post_id SET p.comment_count = c.cnt",
 	}
 
 	for _, sql := range sqls {
@@ -225,26 +227,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		return posts, nil
 	}
 
-	type countRow struct {
-		PostID int `db:"post_id"`
-		Count  int `db:"count"`
-	}
-	countMap := make(map[int]int, len(posts))
-	{
-		query, args, err := sqlx.In("SELECT `post_id`, COUNT(*) AS `count` FROM `comments` WHERE `post_id` IN (?) GROUP BY `post_id`", postIDs)
-		if err != nil {
-			return nil, err
-		}
-		var rows []countRow
-		err = db.Select(&rows, query, args...)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			countMap[row.PostID] = row.Count
-		}
-	}
-
 	var comments []Comment
 	{
 		var (
@@ -312,7 +294,6 @@ ORDER BY post_id, created_at DESC
 			cs[l], cs[r] = cs[r], cs[l]
 		}
 		posts[i].Comments = cs
-		posts[i].CommentCount = countMap[posts[i].ID]
 	}
 
 	return posts, nil
@@ -518,7 +499,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 	results := []Post{}
 
 	err := db.Select(&results, `
-SELECT p.id, p.user_id, p.body, p.mime, p.created_at
+SELECT p.id, p.user_id, p.body, p.mime, p.created_at, p.comment_count
 FROM posts p
 JOIN users u ON p.user_id = u.id
 WHERE u.del_flg = 0
@@ -562,7 +543,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?", user.ID, postsPerPage)
+	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, `comment_count` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?", user.ID, postsPerPage)
 	if err != nil {
 		log.Print(err)
 		return
@@ -626,7 +607,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 	err = db.Select(&results, `
-SELECT p.id, p.user_id, p.body, p.mime, p.created_at
+SELECT p.id, p.user_id, p.body, p.mime, p.created_at, p.comment_count
 FROM posts p
 JOIN users u on p.user_id = u.id
 WHERE u.del_flg = 0
@@ -661,7 +642,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?", pid)
+	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at`, `comment_count` FROM `posts` WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
@@ -794,9 +775,22 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
-	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	tx, err := db.Beginx()
 	if err != nil {
+		log.Print(err)
+		return
+	}
+	if _, err := tx.Exec("INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)", postID, me.ID, r.FormValue("comment")); err != nil {
+		tx.Rollback()
+		log.Print(err)
+		return
+	}
+	if _, err := tx.Exec("UPDATE `posts` SET `comment_count` = `comment_count` + 1 WHERE `id` = ?", postID); err != nil {
+		tx.Rollback()
+		log.Print(err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		log.Print(err)
 		return
 	}

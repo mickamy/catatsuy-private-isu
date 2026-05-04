@@ -201,13 +201,13 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 	posts := make([]Post, 0, postsPerPage)
 	postIDs := make([]int, 0, postsPerPage)
-	for _, p := range results {
+	for i, p := range results {
 		u, ok := userMap[p.UserID]
 		if !ok || u.DelFlg != 0 {
 			continue
 		}
-		p.User = u
-		p.CSRFToken = csrfToken
+		results[i].User = u
+		results[i].CSRFToken = csrfToken
 		posts = append(posts, p)
 		postIDs = append(postIDs, p.ID)
 		if len(posts) >= postsPerPage {
@@ -237,11 +237,6 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 			countMap[row.PostID] = row.Count
 		}
 	}
-	for _, r := range results {
-		if row, ok := countMap[r.ID]; ok {
-			r.CommentCount = row
-		}
-	}
 
 	var comments []Comment
 	{
@@ -263,10 +258,9 @@ FROM (SELECT id,
              created_at,
              ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) AS row_num
       FROM comments
-      WHERE post_id IN (?)
-        AND row_num <= 3
-      ORDER BY created_at DESC
-)
+      WHERE post_id IN (?)) t
+WHERE t.row_num <= 3
+ORDER BY post_id, created_at DESC
 `,
 				postIDs,
 			)

@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -26,8 +27,9 @@ import (
 )
 
 var (
-	db    *sqlx.DB
-	store *gsm.MemcacheStore
+	db        *sqlx.DB
+	store     *gsm.MemcacheStore
+	userCache sync.Map // map[int]User
 )
 
 const (
@@ -139,13 +141,27 @@ func getSessionUser(r *http.Request) User {
 		return User{}
 	}
 
-	u := User{}
+	var idInt int
+	switch v := uid.(type) {
+	case int:
+		idInt = v
+	case int64:
+		idInt = int(v)
+	default:
+		return User{}
+	}
 
-	err := db.Get(&u, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` = ?", uid)
+	if cached, ok := userCache.Load(idInt); ok {
+		return cached.(User)
+	}
+
+	u := User{}
+	err := db.Get(&u, "SELECT `id`, `account_name`, `authority`, `del_flg`, `created_at` FROM `users` WHERE `id` = ?", idInt)
 	if err != nil {
 		return User{}
 	}
 
+	userCache.Store(idInt, u)
 	return u
 }
 
@@ -382,6 +398,7 @@ var (
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	userCache = sync.Map{}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -839,6 +856,9 @@ func postAdminBanned(w http.ResponseWriter, r *http.Request) {
 
 	for _, id := range r.Form["uid[]"] {
 		db.Exec(query, 1, id)
+		if idInt, err := strconv.Atoi(id); err == nil {
+			userCache.Delete(idInt)
+		}
 	}
 
 	http.Redirect(w, r, "/admin/banned", http.StatusFound)

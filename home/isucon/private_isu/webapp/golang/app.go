@@ -871,7 +871,7 @@ func main() {
 	}
 	port := os.Getenv("ISUCONP_DB_PORT")
 	if port == "" {
-		port = "3307"
+		port = "3306"
 	}
 	_, err := strconv.Atoi(port)
 	if err != nil {
